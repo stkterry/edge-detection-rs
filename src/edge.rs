@@ -1,7 +1,9 @@
-use image::{self, GenericImageView};
+use image::{self, GenericImageView, ImageBuffer, Luma};
 use rayon::prelude::*;
 use std::f32::consts::*;
 use std::*;
+
+type SafeLumaBuffer<T> = ImageBuffer<Luma<T>, Vec<T>>;
 
 const TAU: f32 = PI * 2.0;
 
@@ -193,12 +195,16 @@ impl Edge {
 /// * If either `strong_threshold` or `weak_threshold` are outisde the range of 0 to 1 inclusive.
 /// * If `strong_threshold` is less than `weak_threshold`.
 /// * If `image` contains no pixels (either it's width or height is 0).
-pub fn canny<T: Into<image::GrayImage>>(
-    image: T,
+pub fn canny<T, K> (
+    image: K,
     sigma: f32,
     strong_threshold: f32,
     weak_threshold: f32,
-) -> Detection {
+) -> Detection 
+    where
+        T: image::Primitive + std::marker::Sync,
+        K: Into<SafeLumaBuffer<T>>,
+{
     let gs_image = image.into();
     assert!(gs_image.width() > 0);
     assert!(gs_image.height() > 0);
@@ -207,6 +213,21 @@ pub fn canny<T: Into<image::GrayImage>>(
     let edges = hysteresis(&edges, strong_threshold, weak_threshold);
     Detection { edges }
 }
+
+// pub fn canny<T: Into<image::GrayImage>>(
+//     image: T,
+//     sigma: f32,
+//     strong_threshold: f32,
+//     weak_threshold: f32,
+// ) -> Detection {
+//     let gs_image = image.into();
+//     assert!(gs_image.width() > 0);
+//     assert!(gs_image.height() > 0);
+//     let edges = detect_edges(&gs_image, sigma);
+//     let edges = minmax_suppression(&Detection { edges }, weak_threshold);
+//     let edges = hysteresis(&edges, strong_threshold, weak_threshold);
+//     Detection { edges }
+// }
 
 /// Calculates a 2nd order 2D gaussian derivative with size sigma.
 fn filter_kernel(sigma: f32) -> (usize, Vec<(f32, f32)>) {
@@ -243,7 +264,10 @@ fn neighbour_pos_delta(theta: f32) -> (i32, i32) {
 /// Computes the edges in an image using the Canny Method.
 ///
 /// `sigma` determines the radius of the Gaussian kernel.
-fn detect_edges(image: &image::GrayImage, sigma: f32) -> Vec<Vec<Edge>> {
+fn detect_edges<T>(image: &SafeLumaBuffer<T>, sigma: f32) -> Vec<Vec<Edge>> 
+    where
+        T: image::Primitive + std::marker::Sync,
+{
     let (width, height) = (image.width() as i32, image.height() as i32);
     let (ksize, g_kernel) = filter_kernel(sigma);
     let ks = ksize as i32;
@@ -273,7 +297,7 @@ fn detect_edges(image: &image::GrayImage, sigma: f32) -> Vec<Vec<Edge>> {
                                 // detected based on some background color outside image bounds.
                                 let x = clamp(ix + kx, 0, width - 1);
                                 let y = clamp(iy + ky, 0, height - 1);
-                                f32::from(image.unsafe_get_pixel(x as u32, y as u32).0[0])
+                                image.unsafe_get_pixel(x as u32, y as u32).0[0].to_f32().unwrap_unchecked()
                             };
                             sum_x += pix * k.0;
                             sum_y += pix * k.1;
@@ -458,7 +482,7 @@ mod tests {
     ) -> Detection {
         let path = path.as_ref();
         let image = image::open(path).unwrap();
-        let edges = detect_edges(&image.to_luma8(), sigma);
+        let edges = detect_edges(&image.to_luma32f(), sigma);
         let intermediage_d = Detection { edges };
         intermediage_d
             .as_image()
