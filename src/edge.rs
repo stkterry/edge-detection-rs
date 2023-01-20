@@ -1,9 +1,9 @@
-use image::{self, GenericImageView, ImageBuffer, Luma};
+use image::{self, GenericImageView};
 use rayon::prelude::*;
 use std::f32::consts::*;
 use std::*;
 
-type SafeLumaBuffer<T> = ImageBuffer<Luma<T>, Vec<T>>;
+type SafeLumaBuffer = image::ImageBuffer<image::Luma<f32>, Vec<f32>>;
 
 const TAU: f32 = PI * 2.0;
 
@@ -131,7 +131,7 @@ pub struct Edge {
 }
 
 impl Edge {
-    fn new(vec_x: f32, vec_y: f32) -> Edge {
+    fn new(vec_x: f32, vec_y: f32) -> Self {
         let vec_x = FRAC_1_SQRT_2 * clamp(vec_x, -1.0, 1.0);
         let vec_y = FRAC_1_SQRT_2 * clamp(vec_y, -1.0, 1.0);
         let magnitude = f32::hypot(vec_x, vec_y);
@@ -141,13 +141,17 @@ impl Edge {
         } else {
             1.0
         };
-        Edge {
+        Self {
             vec_x: vec_x * frac_1_mag,
             vec_y: vec_y * frac_1_mag,
             magnitude,
         }
     }
 
+    fn zeros() -> Self {
+        Self { vec_x: 0.0, vec_y: 0.0, magnitude: 0.0 }
+    }
+    
     /// The direction of the gradient in radians.
     ///
     /// This is a convenience function for `atan2(direction)`.
@@ -177,6 +181,7 @@ impl Edge {
     }
 }
 
+
 /// Computes the canny edges of an image.
 ///
 /// The variable `sigma` determines the size of the filter kernel which affects the precision and
@@ -195,17 +200,14 @@ impl Edge {
 /// * If either `strong_threshold` or `weak_threshold` are outisde the range of 0 to 1 inclusive.
 /// * If `strong_threshold` is less than `weak_threshold`.
 /// * If `image` contains no pixels (either it's width or height is 0).
-pub fn canny<T, K> (
-    image: K,
+pub fn canny(
+    image: image::DynamicImage,
     sigma: f32,
     strong_threshold: f32,
     weak_threshold: f32,
-) -> Detection 
-    where
-        T: image::Primitive + std::marker::Sync,
-        K: Into<SafeLumaBuffer<T>>,
-{
-    let gs_image = image.into();
+) -> Detection {
+    let gs_image = image.to_luma32f();
+
     assert!(gs_image.width() > 0);
     assert!(gs_image.height() > 0);
     let edges = detect_edges(&gs_image, sigma);
@@ -214,20 +216,6 @@ pub fn canny<T, K> (
     Detection { edges }
 }
 
-// pub fn canny<T: Into<image::GrayImage>>(
-//     image: T,
-//     sigma: f32,
-//     strong_threshold: f32,
-//     weak_threshold: f32,
-// ) -> Detection {
-//     let gs_image = image.into();
-//     assert!(gs_image.width() > 0);
-//     assert!(gs_image.height() > 0);
-//     let edges = detect_edges(&gs_image, sigma);
-//     let edges = minmax_suppression(&Detection { edges }, weak_threshold);
-//     let edges = hysteresis(&edges, strong_threshold, weak_threshold);
-//     Detection { edges }
-// }
 
 /// Calculates a 2nd order 2D gaussian derivative with size sigma.
 fn filter_kernel(sigma: f32) -> (usize, Vec<(f32, f32)>) {
@@ -264,13 +252,11 @@ fn neighbour_pos_delta(theta: f32) -> (i32, i32) {
 /// Computes the edges in an image using the Canny Method.
 ///
 /// `sigma` determines the radius of the Gaussian kernel.
-fn detect_edges<T>(image: &SafeLumaBuffer<T>, sigma: f32) -> Vec<Vec<Edge>> 
-    where
-        T: image::Primitive + std::marker::Sync,
-{
+fn detect_edges(image: &SafeLumaBuffer, sigma: f32) -> Vec<Vec<Edge>> {
     let (width, height) = (image.width() as i32, image.height() as i32);
     let (ksize, g_kernel) = filter_kernel(sigma);
     let ks = ksize as i32;
+
     (0..width)
         .into_par_iter()
         .map(|g_ix| {
@@ -297,13 +283,13 @@ fn detect_edges<T>(image: &SafeLumaBuffer<T>, sigma: f32) -> Vec<Vec<Edge>>
                                 // detected based on some background color outside image bounds.
                                 let x = clamp(ix + kx, 0, width - 1);
                                 let y = clamp(iy + ky, 0, height - 1);
-                                image.unsafe_get_pixel(x as u32, y as u32).0[0].to_f32().unwrap_unchecked()
+                                image.unsafe_get_pixel(x as u32, y as u32).0[0]
                             };
                             sum_x += pix * k.0;
                             sum_y += pix * k.1;
                         }
                     }
-                    Edge::new(sum_x / 255.0, sum_y / 255.0)
+                    Edge::new(sum_x, sum_y)
                 })
                 .collect()
         })
@@ -322,7 +308,7 @@ fn minmax_suppression(edges: &Detection, weak_threshold: f32) -> Vec<Vec<Edge>> 
                     let edge = edges.edges[x][y];
                     if edge.magnitude < weak_threshold {
                         // Skip distance computation for non-edges.
-                        return Edge::new(0.0, 0.0);
+                        return Edge::zeros();
                     }
                     // Truncating the edge magnitudes helps mitigate rounding errors for thick edges.
                     let truncate = |f: f32| (f * 1e5).round() * 1e-6;
@@ -386,7 +372,7 @@ fn minmax_suppression(edges: &Detection, weak_threshold: f32) -> Vec<Vec<Edge>> 
                     if is_apex {
                         edge
                     } else {
-                        Edge::new(0.0, 0.0)
+                        Edge::zeros()
                     }
                 })
                 .collect()
@@ -401,7 +387,7 @@ fn hysteresis(edges: &[Vec<Edge>], strong_threshold: f32, weak_threshold: f32) -
     assert!(weak_threshold < strong_threshold);
 
     let (width, height) = (edges.len(), edges.first().unwrap().len());
-    let mut edges_out: Vec<Vec<Edge>> = vec![vec![Edge::new(0.0, 0.0); height]; width];
+    let mut edges_out: Vec<Vec<Edge>> = vec![vec![Edge::zeros(); height]; width];
     for x in 0..width {
         for y in 0..height {
             if edges[x][y].magnitude < strong_threshold
