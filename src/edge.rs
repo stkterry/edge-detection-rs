@@ -6,6 +6,18 @@ use std::*;
 type SafeLumaBuffer = image::ImageBuffer<image::Luma<f32>, Vec<f32>>;
 
 const TAU: f32 = PI * 2.0;
+const FRAC_3PI_4: f32 = FRAC_PI_4 + FRAC_PI_2;
+
+const NEIGHBOURS_MAP: [(i32, i32); 8] = [
+    (1, 0),   // middle right
+    (1, 1),   // bottom right
+    (0, 1),   // center bottom
+    (-1, 1),  // bottom left
+    (-1, 0),  // middle left
+    (-1, -1), // top left
+    (0, -1),  // center top
+    (1, -1),  // top right
+];
 
 #[inline(always)]
 fn clamp<T: PartialOrd>(f: T, lo: T, hi: T) -> T {
@@ -148,6 +160,7 @@ impl Edge {
         }
     }
 
+    #[inline]
     fn zeros() -> Self {
         Self { vec_x: 0.0, vec_y: 0.0, magnitude: 0.0 }
     }
@@ -206,11 +219,10 @@ pub fn canny(
     strong_threshold: f32,
     weak_threshold: f32,
 ) -> Detection {
-    let gs_image = image.to_luma32f();
 
-    assert!(gs_image.width() > 0);
-    assert!(gs_image.height() > 0);
-    let edges = detect_edges(&gs_image, sigma);
+    assert!(image.width() > 0);
+    assert!(image.height() > 0);
+    let edges = detect_edges(&image.to_luma32f(), sigma);
     let edges = minmax_suppression(&Detection { edges }, weak_threshold);
     let edges = hysteresis(&edges, strong_threshold, weak_threshold);
     Detection { edges }
@@ -234,19 +246,9 @@ fn filter_kernel(sigma: f32) -> (usize, Vec<(f32, f32)>) {
 }
 
 fn neighbour_pos_delta(theta: f32) -> (i32, i32) {
-    let neighbours = [
-        (1, 0),   // middle right
-        (1, 1),   // bottom right
-        (0, 1),   // center bottom
-        (-1, 1),  // bottom left
-        (-1, 0),  // middle left
-        (-1, -1), // top left
-        (0, -1),  // center top
-        (1, -1),  // top right
-    ];
     let n = ((theta + TAU) % TAU) / TAU;
     let i = (n * 8.0).round() as usize % 8;
-    neighbours[i]
+    NEIGHBOURS_MAP[i]
 }
 
 /// Computes the edges in an image using the Canny Method.
@@ -265,6 +267,7 @@ fn detect_edges(image: &SafeLumaBuffer, sigma: f32) -> Vec<Vec<Edge>> {
             (0..height)
                 .into_par_iter()
                 .map(move |iy| {
+
                     let mut sum_x = 0.0;
                     let mut sum_y = 0.0;
 
@@ -404,10 +407,10 @@ fn hysteresis(edges: &[Vec<Edge>], strong_threshold: f32, weak_threshold: f32) -
                     let edge = edges[current_pos.0][current_pos.1];
                     edges_out[current_pos.0][current_pos.1] = edge;
                     // Attempt to find the next line-segment of the edge in tree directions ahead.
-                    let (nb_pos, nb_magnitude) = [FRAC_PI_4, 0.0, -FRAC_PI_4]
+                    let (nb_pos, nb_magnitude) = [FRAC_3PI_4, FRAC_PI_2, FRAC_PI_4]
                         .iter()
                         .map(|bearing| {
-                            neighbour_pos_delta(edge.angle() + FRAC_PI_2 + side + bearing)
+                            neighbour_pos_delta(edge.angle() + side + bearing)
                         })
                         // Filter out hypothetical neighbours that are outside image bounds.
                         .filter_map(|(nb_dx, nb_dy)| {
