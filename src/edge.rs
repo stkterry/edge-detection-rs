@@ -46,7 +46,7 @@ impl Detection {
     /// Returns the height of the computed image.
     pub fn height(&self) -> usize {
         self.edges[0].len()
-    }
+    }    
 
     /// Linearly interpolates the edge at the specified location.
     ///
@@ -131,6 +131,12 @@ impl ops::Index<(usize, usize)> for Detection {
     type Output = Edge;
     fn index(&self, index: (usize, usize)) -> &Self::Output {
         &self.edges[index.0][index.1]
+    }
+}
+
+impl Into<Vec<Vec<Edge>>> for Detection {
+    fn into(self) -> Vec<Vec<Edge>> {
+        self.edges
     }
 }
 
