@@ -46,7 +46,7 @@ impl Detection {
     /// Returns the height of the computed image.
     pub fn height(&self) -> usize {
         self.edges[0].len()
-    }    
+    }
 
     /// Linearly interpolates the edge at the specified location.
     ///
@@ -168,9 +168,13 @@ impl Edge {
 
     #[inline]
     fn zeros() -> Self {
-        Self { vec_x: 0.0, vec_y: 0.0, magnitude: 0.0 }
+        Self {
+            vec_x: 0.0,
+            vec_y: 0.0,
+            magnitude: 0.0,
+        }
     }
-    
+
     /// The direction of the gradient in radians.
     ///
     /// This is a convenience function for `atan2(direction)`.
@@ -200,7 +204,6 @@ impl Edge {
     }
 }
 
-
 /// Computes the canny edges of an image.
 ///
 /// The variable `sigma` determines the size of the filter kernel which affects the precision and
@@ -225,7 +228,6 @@ pub fn canny(
     strong_threshold: f32,
     weak_threshold: f32,
 ) -> Detection {
-
     assert!(image.width() > 0);
     assert!(image.height() > 0);
     let edges = detect_edges(&image.to_luma32f(), sigma);
@@ -233,7 +235,6 @@ pub fn canny(
     let edges = hysteresis(&edges, strong_threshold, weak_threshold);
     Detection { edges }
 }
-
 
 /// Calculates a 2nd order 2D gaussian derivative with size sigma.
 fn filter_kernel(sigma: f32) -> (usize, Vec<(f32, f32)>) {
@@ -273,7 +274,6 @@ fn detect_edges(image: &SafeLumaBuffer, sigma: f32) -> Vec<Vec<Edge>> {
             (0..height)
                 .into_par_iter()
                 .map(move |iy| {
-
                     let mut sum_x = 0.0;
                     let mut sum_y = 0.0;
 
@@ -415,9 +415,7 @@ fn hysteresis(edges: &[Vec<Edge>], strong_threshold: f32, weak_threshold: f32) -
                     // Attempt to find the next line-segment of the edge in tree directions ahead.
                     let (nb_pos, nb_magnitude) = [FRAC_3PI_4, FRAC_PI_2, FRAC_PI_4]
                         .iter()
-                        .map(|bearing| {
-                            neighbour_pos_delta(edge.angle() + side + bearing)
-                        })
+                        .map(|bearing| neighbour_pos_delta(edge.angle() + side + bearing))
                         // Filter out hypothetical neighbours that are outside image bounds.
                         .filter_map(|(nb_dx, nb_dy)| {
                             let nb_x = current_pos.0 as i32 + nb_dx;
